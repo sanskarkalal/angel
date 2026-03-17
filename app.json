@@ -18,7 +18,7 @@
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/adaptive-icon.png",
+        "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundColor": "#0d0d14"
       },
       "package": "com.angel.app"
@@ -40,7 +40,7 @@
       "@react-native-community/datetimepicker"
     ],
     "experiments": {
-      "typedRoutes": true
+      "typedRoutes": false
     }
   }
 }
