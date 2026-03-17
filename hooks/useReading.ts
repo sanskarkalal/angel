@@ -1,5 +1,8 @@
 import { useState, useCallback } from "react";
+import { router } from "expo-router";
 import { useAuthStore } from "@/store/authStore";
+import { useProfileStore } from "@/store/profileStore";
+import { supabase } from "@/lib/supabase";
 
 interface Message {
   role: "angel" | "user";
@@ -30,7 +33,8 @@ interface UseReadingReturn extends ReadingState {
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000";
 
 export function useReading(): UseReadingReturn {
-  const { session } = useAuthStore();
+  const { session, signOut } = useAuthStore();
+  const { clearProfile } = useProfileStore();
   const [state, setState] = useState<ReadingState>({
     loading: false,
     streaming: false,
@@ -71,6 +75,14 @@ export function useReading(): UseReadingReturn {
       });
 
       if (!response.ok) {
+        if (response.status === 401) {
+          await supabase.auth.signOut();
+          clearProfile();
+          signOut();
+          router.replace("/(auth)/login");
+          throw new Error("Session expired. Please log in again.");
+        }
+
         if (response.status === 429) {
           // Cached reading returned
           const data = await response.json() as {
@@ -99,86 +111,112 @@ export function useReading(): UseReadingReturn {
         throw new Error(`Server error: ${response.status}`);
       }
 
-      // Parse SSE stream
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error("No response body");
-
-      const decoder = new TextDecoder();
       let fullText = "";
       let cardName = "";
       let cardArcana = "";
       let cardReversed = false;
       let readingId = "";
-      let firstChunk = true;
+      const processSseLine = (line: string) => {
+        if (!line.startsWith("data: ")) return false;
+        const data = line.slice(6).trim();
 
+        if (data === "[DONE]") {
+          setState((s) => ({
+            ...s,
+            streaming: false,
+            complete: true,
+            finalText: fullText,
+            loading: false,
+          }));
+          return true;
+        }
+
+        try {
+          const parsed = JSON.parse(data) as {
+            type?: string;
+            text?: string;
+            message?: string;
+            card?: {
+              name: string;
+              arcana: string;
+              reversed: boolean;
+            };
+            readingId?: string;
+          };
+
+          if (parsed.type === "card") {
+            cardName = parsed.card?.name ?? "";
+            cardArcana = parsed.card?.arcana ?? "";
+            cardReversed = parsed.card?.reversed ?? false;
+            readingId = parsed.readingId ?? "";
+
+            setState((s) => ({
+              ...s,
+              cardName,
+              cardArcana,
+              cardReversed,
+              readingId,
+              loading: false,
+              streaming: true,
+            }));
+          } else if (parsed.type === "text" && parsed.text) {
+            fullText += parsed.text;
+            setState((s) => ({
+              ...s,
+              streamingText: fullText,
+              loading: false,
+              streaming: true,
+            }));
+          } else if (parsed.type === "done") {
+            if (parsed.readingId) readingId = parsed.readingId;
+          } else if (parsed.type === "error") {
+            throw new Error(parsed.message ?? "The connection wavered.");
+          }
+        } catch (err) {
+          if (err instanceof Error) {
+            throw err;
+          }
+        }
+
+        return false;
+      };
+
+      // RN fetch can return null body in some environments (notably Expo Go/iOS).
+      // Fall back to buffered text parsing when streams are unavailable.
+      const reader = response.body?.getReader();
+      if (!reader) {
+        const sseText = await response.text();
+        const lines = sseText.split("\n");
+        let done = false;
+        for (const line of lines) {
+          done = processSseLine(line);
+          if (done) break;
+        }
+        if (!done) {
+          setState((s) => ({
+            ...s,
+            loading: false,
+            streaming: false,
+            complete: true,
+            finalText: fullText,
+          }));
+        }
+        return;
+      }
+
+      const decoder = new TextDecoder();
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
         const chunk = decoder.decode(value, { stream: true });
         const lines = chunk.split("\n");
-
+        let shouldStop = false;
         for (const line of lines) {
-          if (line.startsWith("data: ")) {
-            const data = line.slice(6).trim();
-
-            if (data === "[DONE]") {
-              setState((s) => ({
-                ...s,
-                streaming: false,
-                complete: true,
-                finalText: fullText,
-                loading: false,
-              }));
-              break;
-            }
-
-            try {
-              const parsed = JSON.parse(data) as {
-                type?: string;
-                text?: string;
-                card?: {
-                  name: string;
-                  arcana: string;
-                  reversed: boolean;
-                };
-                readingId?: string;
-              };
-
-              if (parsed.type === "card") {
-                cardName = parsed.card?.name ?? "";
-                cardArcana = parsed.card?.arcana ?? "";
-                cardReversed = parsed.card?.reversed ?? false;
-                readingId = parsed.readingId ?? "";
-
-                setState((s) => ({
-                  ...s,
-                  cardName,
-                  cardArcana,
-                  cardReversed,
-                  readingId,
-                  loading: false,
-                  streaming: true,
-                }));
-              } else if (parsed.type === "text" && parsed.text) {
-                fullText += parsed.text;
-
-                if (firstChunk) {
-                  firstChunk = false;
-                }
-
-                setState((s) => ({
-                  ...s,
-                  streamingText: fullText,
-                  loading: false,
-                  streaming: true,
-                }));
-              }
-            } catch {
-              // Non-JSON data line, skip
-            }
-          }
+          shouldStop = processSseLine(line);
+          if (shouldStop) break;
         }
+        if (shouldStop) break;
       }
     } catch (err) {
       const message =
@@ -191,7 +229,7 @@ export function useReading(): UseReadingReturn {
         error: message,
       }));
     }
-  }, [session]);
+  }, [clearProfile, session, signOut]);
 
   const sendReply = useCallback(
     async (message: string) => {
@@ -224,6 +262,14 @@ export function useReading(): UseReadingReturn {
           }),
         });
 
+        if (response.status === 401) {
+          await supabase.auth.signOut();
+          clearProfile();
+          signOut();
+          router.replace("/(auth)/login");
+          throw new Error("Session expired. Please log in again.");
+        }
+
         if (!response.ok) throw new Error(`Chat error: ${response.status}`);
 
         const data = await response.json() as { reply: string };
@@ -248,7 +294,7 @@ export function useReading(): UseReadingReturn {
         }));
       }
     },
-    [session, state.readingId, state.conversation]
+    [clearProfile, session, signOut, state.readingId, state.conversation]
   );
 
   const retry = useCallback(() => {

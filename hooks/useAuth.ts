@@ -1,21 +1,27 @@
 import { useEffect } from "react";
+import { router } from "expo-router";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/store/authStore";
 import { useProfileStore } from "@/store/profileStore";
 import type { UserProfile } from "@/store/profileStore";
 
 export function useAuth() {
-  const { user, session, loading, setSession, setLoading } = useAuthStore();
-  const { setProfile, clearProfile } = useProfileStore();
+  const { user, session, loading, setSession, setLoading: setAuthLoading } = useAuthStore();
+  const {
+    setProfile,
+    clearProfile,
+    setLoading: setProfileLoading,
+  } = useProfileStore();
 
   useEffect(() => {
     // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       if (session?.user) {
+        setProfileLoading(true);
         fetchProfile(session.user.id);
       } else {
-        setLoading(false);
+        setAuthLoading(false);
       }
     });
 
@@ -24,10 +30,11 @@ export function useAuth() {
       async (_event, session) => {
         setSession(session);
         if (session?.user) {
+          setProfileLoading(true);
           await fetchProfile(session.user.id);
         } else {
           clearProfile();
-          setLoading(false);
+          setAuthLoading(false);
         }
       }
     );
@@ -43,16 +50,44 @@ export function useAuth() {
         .eq("user_id", userId)
         .single();
 
-      if (error && error.code !== "PGRST116") {
+      if (error) {
+        // No row yet is expected for new users.
+        if (error.code === "PGRST116") {
+          setProfile(null);
+          return;
+        }
+
+        // Missing table in local/dev schema should not block auth flow.
+        if (error.code === "PGRST205") {
+          setProfile(null);
+          return;
+        }
+
+        const message = (error.message ?? "").toLowerCase();
+        const shouldForceReauth =
+          error.code === "PGRST301" ||
+          message.includes("jwt") ||
+          message.includes("invalid token");
+        if (shouldForceReauth) {
+          await supabase.auth.signOut();
+          clearProfile();
+          setSession(null);
+          router.replace("/(auth)/login");
+          return;
+        }
+
         console.error("Error fetching profile:", error);
       }
 
       setProfile(data as UserProfile | null);
     } catch (err) {
       console.error("fetchProfile error:", err);
-      setLoading(false);
+      setProfile(null);
+      setProfileLoading(false);
+      setAuthLoading(false);
     } finally {
-      setLoading(false);
+      setProfileLoading(false);
+      setAuthLoading(false);
     }
   }
 

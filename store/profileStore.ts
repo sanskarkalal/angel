@@ -37,5 +37,5 @@ export const useProfileStore = create<ProfileState>((set) => ({
     set((state) => ({
       profile: state.profile ? { ...state.profile, ...updates } : null,
     })),
-  clearProfile: () => set({ profile: null }),
+  clearProfile: () => set({ profile: null, loading: false }),
 }));

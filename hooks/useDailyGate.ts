@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { router } from "expo-router";
 import { supabase } from "@/lib/supabase";
 import { useAuthStore } from "@/store/authStore";
+import { useProfileStore } from "@/store/profileStore";
 
 interface DailyReading {
   id: string;
@@ -29,7 +31,8 @@ const getTodayKey = () => {
 const STORAGE_PREFIX = "angel_daily_gate_";
 
 export function useDailyGate(): DailyGateState {
-  const { user } = useAuthStore();
+  const { user, signOut } = useAuthStore();
+  const { clearProfile } = useProfileStore();
   const [hasRead, setHasRead] = useState(false);
   const [reading, setReading] = useState<DailyReading | null>(null);
   const [loading, setLoading] = useState(true);
@@ -62,8 +65,35 @@ export function useDailyGate(): DailyGateState {
         .eq("reading_date", today)
         .single();
 
-      if (error && error.code !== "PGRST116") {
-        console.error("useDailyGate Supabase error:", error);
+      if (error) {
+        const message = (error.message ?? "").toLowerCase();
+        const shouldForceReauth =
+          error.code === "PGRST301" ||
+          message.includes("jwt") ||
+          message.includes("invalid token");
+
+        if (shouldForceReauth) {
+          await supabase.auth.signOut();
+          clearProfile();
+          signOut();
+          router.replace("/(auth)/login");
+          setHasRead(false);
+          setReading(null);
+          setLoading(false);
+          return;
+        }
+
+        // Missing table in local/dev environments should not block auth flow.
+        if (error.code === "PGRST205") {
+          setHasRead(false);
+          setReading(null);
+          setLoading(false);
+          return;
+        }
+
+        if (error.code !== "PGRST116") {
+          console.error("useDailyGate Supabase error:", error);
+        }
       }
 
       if (data) {
@@ -80,7 +110,7 @@ export function useDailyGate(): DailyGateState {
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [clearProfile, signOut, user]);
 
   const markAsRead = useCallback(
     async (newReading: DailyReading) => {
