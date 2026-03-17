@@ -5,20 +5,66 @@ import {
   ScrollView,
   KeyboardAvoidingView,
   Platform,
+  Linking,
   Pressable,
-  Alert,
+  ActivityIndicator,
 } from "react-native";
 import { router } from "expo-router";
+import { useEffect } from "react";
+import * as WebBrowser from "expo-web-browser";
+import { makeRedirectUri } from "expo-auth-session";
 import { supabase } from "@/lib/supabase";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import { Colors } from "@/constants/colors";
 import { Fonts } from "@/constants/fonts";
+
+WebBrowser.maybeCompleteAuthSession();
+
+function parseParams(input: string) {
+  const params: Record<string, string> = {};
+  if (!input) return params;
+
+  for (const part of input.split("&")) {
+    const [rawKey, rawValue = ""] = part.split("=");
+    if (!rawKey) continue;
+    params[decodeURIComponent(rawKey)] = decodeURIComponent(rawValue);
+  }
+
+  return params;
+}
+
+function upsertQueryParam(url: string, key: string, value: string) {
+  const [base, hashPart = ""] = url.split("#");
+  const [path, queryPart = ""] = base.split("?");
+  const current = parseParams(queryPart);
+  current[key] = value;
+
+  const nextQuery = Object.entries(current)
+    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
+    .join("&");
+
+  return `${path}?${nextQuery}${hashPart ? `#${hashPart}` : ""}`;
+}
+
+function extractOAuthParams(url: string) {
+  const [base, hash = ""] = url.split("#");
+  const query = base.split("?")[1] ?? "";
+  const queryParams = parseParams(query);
+  const hashParams = parseParams(hash);
+
+  const accessToken = hashParams.access_token ?? queryParams.access_token;
+  const refreshToken = hashParams.refresh_token ?? queryParams.refresh_token;
+  const errorDescription =
+    queryParams.error_description ??
+    queryParams.error ??
+    hashParams.error_description ??
+    hashParams.error;
+
+  return { accessToken, refreshToken, errorDescription };
+}
 
 function AngelLogo() {
   return (
     <View style={{ alignItems: "center", gap: 16, marginBottom: 48 }}>
-      {/* Gold halo circle */}
       <View
         style={{
           width: 88,
@@ -43,11 +89,10 @@ function AngelLogo() {
             justifyContent: "center",
           }}
         >
-          <Text style={{ fontSize: 24 }}>✦</Text>
+          <Text style={{ fontSize: 24 }}>*</Text>
         </View>
       </View>
 
-      {/* Angel name */}
       <Text
         style={{
           fontFamily: Fonts.display,
@@ -74,58 +119,113 @@ function AngelLogo() {
 }
 
 export default function LoginScreen() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
-  const [emailError, setEmailError] = useState("");
-  const [passwordError, setPasswordError] = useState("");
   const [generalError, setGeneralError] = useState("");
 
-  function validate(): boolean {
-    let valid = true;
-    setEmailError("");
-    setPasswordError("");
-    setGeneralError("");
+  async function completeOAuthFromUrl(url: string) {
+    const { accessToken, refreshToken, errorDescription } = extractOAuthParams(url);
 
-    if (!email.trim()) {
-      setEmailError("Your email is required.");
-      valid = false;
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      setEmailError("Please enter a valid email.");
-      valid = false;
+    if (errorDescription) {
+      setGeneralError(errorDescription);
+      return false;
     }
-    if (!password) {
-      setPasswordError("Your password is required.");
-      valid = false;
+
+    if (!accessToken || !refreshToken) {
+      setGeneralError("Could not complete Google sign-in. Missing tokens.");
+      return false;
     }
-    return valid;
+
+    const { error: sessionError } = await supabase.auth.setSession({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+    });
+
+    if (sessionError) {
+      setGeneralError(sessionError.message);
+      return false;
+    }
+
+    router.replace("/(tabs)");
+    return true;
   }
 
-  async function handleLogin() {
-    if (!validate()) return;
+  useEffect(() => {
+    Linking.getInitialURL()
+      .then((url) => {
+        if (!url || !url.includes("access_token")) return;
+        void completeOAuthFromUrl(url);
+      })
+      .catch((err) => {
+        console.error("Initial deep link error:", err);
+      });
+  }, []);
+
+  async function handleGoogleSignIn() {
+    setGeneralError("");
     setLoading(true);
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      });
+      const redirectTo =
+        Platform.OS === "web"
+          ? makeRedirectUri({ path: "auth/callback" })
+          : makeRedirectUri({
+              scheme: "angel",
+              path: "auth/callback",
+              preferLocalhost: true,
+            });
 
-      if (error) {
-        if (error.message.toLowerCase().includes("invalid")) {
-          setGeneralError("These credentials don't match our records. Are you sure about that?");
-        } else {
+      if (Platform.OS === "web") {
+        const { error } = await supabase.auth.signInWithOAuth({
+          provider: "google",
+          options: {
+            redirectTo,
+          },
+        });
+
+        if (error) {
           setGeneralError(error.message);
         }
         return;
       }
 
-      router.replace("/(tabs)");
-    } catch (err) {
-      console.error("Login error:", err);
-      setGeneralError("Something stirred the connection. Please try again.");
-    } finally {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: "google",
+        options: {
+          redirectTo,
+          skipBrowserRedirect: true,
+        },
+      });
+
+      if (error) {
+        setGeneralError(error.message);
+        return;
+      }
+
+      if (!data?.url) {
+        setGeneralError("Google sign-in URL was not returned.");
+        return;
+      }
+      const oauthUrl = upsertQueryParam(data.url, "redirect_to", redirectTo);
+
+      const result = await WebBrowser.openAuthSessionAsync(oauthUrl, redirectTo);
+      if (result.type !== "success") {
+        setGeneralError("Google sign-in was canceled.");
+        setLoading(false);
+        return;
+      }
+
+      await completeOAuthFromUrl(result.url);
       setLoading(false);
+    } catch (err) {
+      console.error("Google login error:", err);
+      setGeneralError("Google sign-in failed. Please try again.");
+      if (Platform.OS !== "web") {
+        setLoading(false);
+      }
+    } finally {
+      if (Platform.OS === "web") {
+        setLoading(false);
+      }
     }
   }
 
@@ -145,27 +245,17 @@ export default function LoginScreen() {
         <AngelLogo />
 
         <View style={{ gap: 16 }}>
-          <Input
-            label="Email"
-            placeholder="your@email.com"
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-            autoComplete="email"
-            error={emailError}
-          />
-
-          <Input
-            label="Password"
-            placeholder="••••••••"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            autoComplete="password"
-            error={passwordError}
-            onSubmitEditing={handleLogin}
-          />
+          <Text
+            style={{
+              fontFamily: Fonts.body,
+              fontSize: 14,
+              color: Colors.textSecondary,
+              textAlign: "center",
+              lineHeight: 22,
+            }}
+          >
+            Sign in with Google to continue.
+          </Text>
 
           {generalError ? (
             <Text
@@ -181,32 +271,37 @@ export default function LoginScreen() {
             </Text>
           ) : null}
 
-          <Button
-            variant="primary"
-            loading={loading}
-            onPress={handleLogin}
-            fullWidth
-            style={{ marginTop: 8 }}
-          >
-            Enter
-          </Button>
-
           <Pressable
-            onPress={() => router.push("/(auth)/signup")}
-            style={{ alignItems: "center", padding: 12 }}
+            onPress={handleGoogleSignIn}
+            disabled={loading}
+            style={({ pressed }) => ({
+              marginTop: 8,
+              width: "100%",
+              minHeight: 54,
+              borderRadius: 14,
+              borderWidth: 1,
+              borderColor: "#E5E7EB",
+              backgroundColor: "#FFFFFF",
+              paddingHorizontal: 18,
+              alignItems: "center",
+              justifyContent: "center",
+              opacity: loading ? 0.7 : pressed ? 0.9 : 1,
+            })}
           >
-            <Text
-              style={{
-                fontFamily: Fonts.body,
-                fontSize: 14,
-                color: Colors.textSecondary,
-              }}
-            >
-              First time here?{" "}
-              <Text style={{ color: Colors.gold, fontFamily: Fonts.bodyBold }}>
-                Begin your journey
+            {loading ? (
+              <ActivityIndicator size="small" color="#202124" />
+            ) : (
+              <Text
+                style={{
+                  fontFamily: Fonts.bodyBold,
+                  fontSize: 16,
+                  letterSpacing: 0.2,
+                  color: "#202124",
+                }}
+              >
+                Continue with Google
               </Text>
-            </Text>
+            )}
           </Pressable>
         </View>
       </ScrollView>
