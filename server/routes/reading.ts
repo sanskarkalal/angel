@@ -1,8 +1,9 @@
 import { Router, type Request, type Response } from "express";
 import { getUserFromToken, supabaseAdmin } from "../lib/supabase";
-import { generateReading, generateChatReply } from "../lib/gemini";
+import { generateReading, generateChatReply } from "../lib/llm";
 import { getAngelSystemPrompt, buildReadingContext, buildChatContext } from "../lib/context";
 import { getMoonPhase, isHighEnergyMoon } from "../lib/moonphase";
+import { updateVoiceProfile } from "../lib/voiceProfile";
 
 const router = Router();
 const readingInFlight = new Set<string>();
@@ -313,6 +314,46 @@ router.post("/", async (req: Request, res: Response): Promise<void> => {
 });
 
 // ========== POST /api/reading/chat ==========
+router.get("/chat/history", async (req: Request, res: Response): Promise<void> => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith("Bearer ")) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const token = authHeader.slice(7);
+  const user = await getUserFromToken(token);
+  if (!user) {
+    res.status(401).json({ error: "Invalid token" });
+    return;
+  }
+
+  const readingId = String(req.query.readingId ?? "").trim();
+  if (!readingId) {
+    res.status(400).json({ error: "readingId is required" });
+    return;
+  }
+
+  const { data, error } = await supabaseAdmin
+    .from("conversations")
+    .select("messages")
+    .eq("reading_id", readingId)
+    .eq("user_id", user.id)
+    .single<{ messages: Array<{ role: "angel" | "user"; content: string; timestamp: string }> }>();
+
+  if (error) {
+    if (error.code === "PGRST116") {
+      res.json({ messages: [] });
+      return;
+    }
+    console.error("Chat history fetch error:", error);
+    res.status(500).json({ error: "Failed to load chat history." });
+    return;
+  }
+
+  res.json({ messages: data?.messages ?? [] });
+});
+
 router.post("/chat", async (req: Request, res: Response): Promise<void> => {
   const reqId = `chat-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const authHeader = req.headers.authorization;
@@ -402,8 +443,13 @@ router.post("/chat", async (req: Request, res: Response): Promise<void> => {
       });
     }
 
+    // Fire-and-forget: update voice profile in background
+    updateVoiceProfile(user.id).catch(err => {
+      console.error("[chat] updateVoiceProfile error:", err);
+    });
+
     console.log(`[${reqId}] chat response sent`);
-    res.json({ reply });
+    res.json({ reply, messages: newMessages });
   } catch (err) {
     console.error("Chat error:", err);
     const retryAfterSec = extractRetryAfterSeconds(err);

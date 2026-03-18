@@ -28,6 +28,7 @@ interface ReadingState {
 interface UseReadingReturn extends ReadingState {
   startReading: () => Promise<void>;
   sendReply: (message: string, readingIdOverride?: string) => Promise<void>;
+  hydrateConversation: (readingId: string) => Promise<boolean>;
   retry: () => void;
 }
 
@@ -282,10 +283,11 @@ export function useReading(): UseReadingReturn {
         content: message,
         timestamp: new Date().toISOString(),
       };
+      const nextHistory = [...state.conversation, userMessage];
 
       setState((s) => ({
         ...s,
-        conversation: [...s.conversation, userMessage],
+        conversation: nextHistory,
         loading: true,
         error: null,
       }));
@@ -300,7 +302,7 @@ export function useReading(): UseReadingReturn {
           body: JSON.stringify({
             message,
             readingId: activeReadingId,
-            history: state.conversation,
+            history: nextHistory,
           }),
         });
 
@@ -330,7 +332,10 @@ export function useReading(): UseReadingReturn {
           throw new Error(message);
         }
 
-        const data = await response.json() as { reply: string };
+        const data = await response.json() as {
+          reply: string;
+          messages?: Array<Message>;
+        };
         const angelMessage: Message = {
           role: "angel",
           content: data.reply,
@@ -339,7 +344,9 @@ export function useReading(): UseReadingReturn {
 
         setState((s) => ({
           ...s,
-          conversation: [...s.conversation, angelMessage],
+          conversation: data.messages && data.messages.length > 0
+            ? data.messages
+            : [...s.conversation, angelMessage],
           loading: false,
         }));
       } catch (err) {
@@ -355,6 +362,39 @@ export function useReading(): UseReadingReturn {
     [clearProfile, session, signOut, state.readingId, state.conversation]
   );
 
+  const hydrateConversation = useCallback(
+    async (readingId: string) => {
+      if (!session?.access_token || !readingId) return false;
+
+      try {
+        const response = await fetch(
+          `${API_URL}/api/chat/history?readingId=${encodeURIComponent(readingId)}`,
+          {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+            },
+          }
+        );
+
+        if (!response.ok) {
+          return false;
+        }
+
+        const data = await response.json() as { messages?: Array<Message> };
+        setState((s) => ({
+          ...s,
+          conversation: data.messages ?? [],
+        }));
+        return true;
+      } catch (err) {
+        console.error("hydrateConversation error:", err);
+        return false;
+      }
+    },
+    [session]
+  );
+
   const retry = useCallback(() => {
     setState((s) => ({
       ...s,
@@ -367,5 +407,5 @@ export function useReading(): UseReadingReturn {
     }));
   }, []);
 
-  return { ...state, startReading, sendReply, retry };
+  return { ...state, startReading, sendReply, hydrateConversation, retry };
 }

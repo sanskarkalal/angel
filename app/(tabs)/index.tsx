@@ -6,6 +6,7 @@ import {
   TextInput,
   Pressable,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   Animated as RNAnimated,
 } from "react-native";
@@ -42,6 +43,7 @@ export default function TodayScreen() {
   const cardOpacity = useRef(new RNAnimated.Value(0)).current;
   const contentOpacity = useRef(new RNAnimated.Value(0)).current;
   const scrollRef = useRef<ScrollView>(null);
+  const hydratedReadingIdRef = useRef<string | null>(null);
 
   const isLoading = readingHook.loading || gateLoading;
   const showOrb = isLoading && !readingHook.streaming && !readingHook.complete;
@@ -66,10 +68,27 @@ export default function TodayScreen() {
         duration: 600,
         useNativeDriver: true,
       }).start();
+      if (hydratedReadingIdRef.current !== cachedReading.id) {
+        void (async () => {
+          const hydrated = await readingHook.hydrateConversation(cachedReading.id);
+          if (hydrated) {
+            hydratedReadingIdRef.current = cachedReading.id;
+          }
+        })();
+      }
     } else if (!hasRead && !readingHook.error && !readingHook.loading) {
+      hydratedReadingIdRef.current = null;
       readingHook.startReading();
     }
-  }, [gateLoading, hasRead, readingHook.error, readingHook.loading]);
+  }, [
+    cachedReading,
+    gateLoading,
+    hasRead,
+    readingHook.error,
+    readingHook.hydrateConversation,
+    readingHook.loading,
+    readingHook.startReading,
+  ]);
 
   // When streaming starts, fade in card
   useEffect(() => {
@@ -110,6 +129,19 @@ export default function TodayScreen() {
     }
   }, [readingHook.streamingText]);
 
+  useEffect(() => {
+    const onKeyboardShow = Keyboard.addListener("keyboardDidShow", () => {
+      setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
+    });
+    return () => {
+      onKeyboardShow.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
+  }, [readingHook.conversation.length, readingHook.loading]);
+
   async function handleSendReply() {
     if (!reply.trim()) return;
     const message = reply.trim();
@@ -127,11 +159,15 @@ export default function TodayScreen() {
       <ScrollView
         ref={scrollRef}
         style={{ flex: 1 }}
+        keyboardShouldPersistTaps="handled"
+        onContentSizeChange={() => {
+          scrollRef.current?.scrollToEnd({ animated: true });
+        }}
         contentContainerStyle={{
           padding: 24,
           paddingTop: insets.top + 16,
-          paddingBottom: insets.bottom + 80,
-          gap: 24,
+          paddingBottom: insets.bottom + 96,
+          gap: 20,
         }}
         showsVerticalScrollIndicator={false}
       >
@@ -262,7 +298,7 @@ export default function TodayScreen() {
 
             {/* Conversation history */}
             {readingHook.conversation.length > 0 && (
-              <View style={{ gap: 14 }}>
+              <View style={{ gap: 10 }}>
                 <Separator gold />
                 {readingHook.conversation.map((msg, index) => (
                   <View
@@ -276,11 +312,12 @@ export default function TodayScreen() {
                         maxWidth: "85%",
                         backgroundColor:
                           msg.role === "user" ? Colors.surface2 : Colors.goldSurface,
-                        borderRadius: 12,
+                        borderRadius: 14,
                         borderWidth: 1,
                         borderColor:
                           msg.role === "user" ? Colors.border : Colors.goldBorder,
-                        padding: 14,
+                        paddingVertical: 10,
+                        paddingHorizontal: 12,
                       }}
                     >
                       <Text
@@ -353,12 +390,11 @@ export default function TodayScreen() {
               borderWidth: 1,
               borderColor: Colors.border,
               borderRadius: 20,
-              paddingVertical: 10,
+              height: 40,
               paddingHorizontal: 16,
               color: Colors.textPrimary,
               fontFamily: Fonts.body,
               fontSize: 14,
-              maxHeight: 100,
             }}
           />
           <Pressable
