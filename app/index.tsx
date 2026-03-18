@@ -1,12 +1,15 @@
 import { Redirect } from "expo-router";
 import { View, ActivityIndicator } from "react-native";
 import { useAuthStore } from "@/store/authStore";
+import { useProfileStore } from "@/store/profileStore";
 import { Colors } from "@/constants/colors";
 
 export default function Index() {
   const { user, loading } = useAuthStore();
+  const { profile, loading: profileLoading } = useProfileStore();
+  const isLoading = loading || (!!user && profileLoading);
 
-  if (loading) {
+  if (isLoading) {
     return (
       <View
         style={{
@@ -21,5 +24,13 @@ export default function Index() {
     );
   }
 
-  return <Redirect href={user ? "/(tabs)" : "/(auth)/login"} />;
+  if (!user) {
+    return <Redirect href="/(auth)/login" />;
+  }
+
+  if (!profile || !profile.onboarding_complete) {
+    return <Redirect href="/onboarding/step1-name" />;
+  }
+
+  return <Redirect href="/(tabs)" />;
 }

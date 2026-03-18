@@ -9,6 +9,7 @@ import {
 } from "react-native";
 import { Colors } from "@/constants/colors";
 import { Fonts } from "@/constants/fonts";
+import { ClayTheme, ClayShadows } from "@/constants/clayTheme";
 
 interface InputProps extends TextInputProps {
   label?: string;
@@ -28,9 +29,9 @@ export const Input = forwardRef<TextInput, InputProps>(function Input(
         <Text
           style={{
             fontFamily: Fonts.bodyBold,
-            fontSize: 12,
-            color: Colors.textMuted,
-            letterSpacing: 1.2,
+            fontSize: 11,
+            color: ClayTheme.muted,
+            letterSpacing: 1.4,
             textTransform: "uppercase",
           }}
         >
@@ -44,15 +45,16 @@ export const Input = forwardRef<TextInput, InputProps>(function Input(
         placeholderTextColor={Colors.textMuted}
         style={[
           {
-            backgroundColor: Colors.surface,
+            backgroundColor: ClayTheme.input,
             borderWidth: 1,
-            borderColor: focused ? Colors.goldBorder : Colors.border,
-            borderRadius: 10,
-            paddingVertical: 14,
-            paddingHorizontal: 16,
-            color: Colors.textPrimary,
+            borderColor: focused ? ClayTheme.accent : ClayTheme.inputBorder,
+            borderRadius: 20,
+            paddingVertical: 16,
+            paddingHorizontal: 18,
+            color: ClayTheme.text,
             fontFamily: Fonts.body,
-            fontSize: 15,
+            fontSize: 16,
+            ...ClayShadows.card,
           },
           style,
         ]}

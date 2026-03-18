@@ -6,6 +6,51 @@ import { getMoonPhase, isHighEnergyMoon } from "../lib/moonphase";
 
 const router = Router();
 
+function extractRetryAfterSeconds(err: unknown): number | null {
+  if (!err || typeof err !== "object") return null;
+  const maybeAny = err as {
+    retryAfterSec?: number;
+    message?: string;
+    errorDetails?: Array<{ ["@type"]?: string; retryDelay?: string }>;
+  };
+
+  if (typeof maybeAny.retryAfterSec === "number" && maybeAny.retryAfterSec > 0) {
+    return maybeAny.retryAfterSec;
+  }
+
+  const details = maybeAny.errorDetails;
+  if (Array.isArray(details)) {
+    const retryInfo = details.find(
+      (d) => d?.["@type"] === "type.googleapis.com/google.rpc.RetryInfo"
+    );
+    const rawDelay = retryInfo?.retryDelay;
+    if (rawDelay) {
+      const match = rawDelay.match(/(\d+)s/);
+      if (match) {
+        return Number.parseInt(match[1], 10);
+      }
+    }
+  }
+
+  const msg = maybeAny.message ?? "";
+  const match = msg.match(/(\d+)\s*s(ec(onds?)?)?/i);
+  if (!match) return null;
+  const sec = Number.parseInt(match[1], 10);
+  return Number.isNaN(sec) ? null : sec;
+}
+
+function isQuotaError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const maybeAny = err as { status?: number; message?: string };
+  const msg = (maybeAny.message ?? "").toLowerCase();
+  return (
+    maybeAny.status === 429 ||
+    msg.includes("quota") ||
+    msg.includes("rate limit") ||
+    msg.includes("too many requests")
+  );
+}
+
 // ========== Tarot deck (inline for server use) ==========
 interface SimpleCard {
   id: string;
@@ -64,6 +109,7 @@ function isCardReversed(): boolean {
 
 // ========== POST /api/reading ==========
 router.post("/", async (req: Request, res: Response): Promise<void> => {
+  const reqId = `reading-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   // 1. Verify auth
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith("Bearer ")) {
@@ -77,6 +123,7 @@ router.post("/", async (req: Request, res: Response): Promise<void> => {
     res.status(401).json({ error: "Invalid token" });
     return;
   }
+  console.log(`[${reqId}] /api/reading start user=${user.id}`);
 
   const today = new Date().toISOString().split("T")[0];
 
@@ -89,6 +136,9 @@ router.post("/", async (req: Request, res: Response): Promise<void> => {
     .single();
 
   if (existingReading) {
+    console.log(
+      `[${reqId}] cached reading hit id=${existingReading.id} textLen=${(existingReading.reading_text ?? "").length}`
+    );
     // Return cached reading
     res.status(429).json({
       cached: true,
@@ -100,6 +150,7 @@ router.post("/", async (req: Request, res: Response): Promise<void> => {
   // 3. Draw card
   const card = drawServerCard();
   const reversed = isCardReversed();
+  console.log(`[${reqId}] card drawn name="${card.name}" reversed=${reversed}`);
 
   // 4. Build context
   let context: string;
@@ -112,8 +163,24 @@ router.post("/", async (req: Request, res: Response): Promise<void> => {
     });
   } catch (err) {
     console.error("buildReadingContext error:", err);
-    res.status(500).json({ error: "Could not build reading context" });
-    return;
+    const moon = getMoonPhase(new Date());
+    context = [
+      "=== ABOUT THE PERSON YOU ARE SPEAKING WITH ===",
+      "Name: Beloved",
+      "",
+      "=== COSMIC CONTEXT ===",
+      `Current moon phase: ${moon.name} ${moon.emoji}`,
+      `Moon meaning: ${moon.meaning}`,
+      `Cosmic tone: ${moon.toneModifier}`,
+      "",
+      "=== TODAY'S CARD ===",
+      `Today's tarot card: ${card.name} (${reversed ? "reversed" : "upright"})`,
+      `Card meaning: ${reversed ? card.reversedMeaning : card.uprightMeaning}`,
+      `Card keywords: ${card.keywords.join(", ")}`,
+      "",
+      "=== YOUR TASK ===",
+      "Offer a warm, poetic, grounded reading that references the moon phase and card symbolism.",
+    ].join("\n");
   }
 
   const systemPrompt = getAngelSystemPrompt();
@@ -132,16 +199,27 @@ router.post("/", async (req: Request, res: Response): Promise<void> => {
     })}\n\n`
   );
 
-  // 6. Stream Gemini response
+  // 6. Stream AI response
   let fullText = "";
+  let chunkCount = 0;
   try {
     for await (const chunk of generateReading(systemPrompt, context)) {
       fullText += chunk;
+      chunkCount += 1;
       res.write(`data: ${JSON.stringify({ type: "text", text: chunk })}\n\n`);
     }
+    console.log(
+      `[${reqId}] stream complete chunks=${chunkCount} textLen=${fullText.length} preview="${fullText.slice(0, 120).replace(/\s+/g, " ")}"`
+    );
   } catch (err) {
-    console.error("Gemini streaming error:", err);
-    res.write(`data: ${JSON.stringify({ type: "error", message: "The connection wavered." })}\n\n`);
+    console.error("AI streaming error:", err);
+    const retryAfterSec = extractRetryAfterSeconds(err);
+    const message = isQuotaError(err)
+      ? `The current is crowded right now. Please try again in ${retryAfterSec ?? 45} seconds.`
+      : "The connection wavered.";
+    res.write(
+      `data: ${JSON.stringify({ type: "error", message, retryAfterSec })}\n\n`
+    );
     res.end();
     return;
   }
@@ -163,6 +241,7 @@ router.post("/", async (req: Request, res: Response): Promise<void> => {
       .single();
 
     savedReadingId = saved?.id ?? null;
+    console.log(`[${reqId}] reading saved id=${savedReadingId ?? "null"}`);
   } catch (err) {
     console.error("Error saving reading:", err);
   }
@@ -177,6 +256,7 @@ router.post("/", async (req: Request, res: Response): Promise<void> => {
 
 // ========== POST /api/reading/chat ==========
 router.post("/chat", async (req: Request, res: Response): Promise<void> => {
+  const reqId = `chat-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   const authHeader = req.headers.authorization;
   if (!authHeader?.startsWith("Bearer ")) {
     res.status(401).json({ error: "Unauthorized" });
@@ -200,6 +280,9 @@ router.post("/chat", async (req: Request, res: Response): Promise<void> => {
     res.status(400).json({ error: "Message is required" });
     return;
   }
+  console.log(
+    `[${reqId}] /api/reading/chat start user=${user.id} readingId=${readingId} historyCount=${history?.length ?? 0} msgLen=${message.length}`
+  );
 
   // Fetch the reading for context
   const { data: reading } = await supabaseAdmin
@@ -222,7 +305,7 @@ router.post("/chat", async (req: Request, res: Response): Promise<void> => {
     reading.card_reversed
   );
 
-  // Build history for Gemini
+  // Build history for AI provider
   const geminiHistory = history.map((msg) => ({
     role: msg.role === "angel" ? "model" as const : "user" as const,
     parts: msg.content,
@@ -230,6 +313,9 @@ router.post("/chat", async (req: Request, res: Response): Promise<void> => {
 
   try {
     const reply = await generateChatReply(systemPrompt, context, message, geminiHistory);
+    console.log(
+      `[${reqId}] chat reply generated len=${reply.length} preview="${reply.slice(0, 120).replace(/\s+/g, " ")}"`
+    );
 
     // Save conversation
     const { data: existingConv } = await supabaseAdmin
@@ -258,9 +344,20 @@ router.post("/chat", async (req: Request, res: Response): Promise<void> => {
       });
     }
 
+    console.log(`[${reqId}] chat response sent`);
     res.json({ reply });
   } catch (err) {
     console.error("Chat error:", err);
+    const retryAfterSec = extractRetryAfterSeconds(err);
+    if (isQuotaError(err)) {
+      res
+        .status(429)
+        .json({
+          error: `The current is crowded right now. Please try again in ${retryAfterSec ?? 45} seconds.`,
+          retryAfterSec,
+        });
+      return;
+    }
     res.status(500).json({ error: "The connection wavered. Please try again." });
   }
 });

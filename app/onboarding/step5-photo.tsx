@@ -13,13 +13,15 @@ import { router } from "expo-router";
 import * as ImagePicker from "expo-image-picker";
 import { Button } from "@/components/ui/button";
 import { ProgressBar } from "@/components/angel/ProgressBar";
+import { ClayBackdrop } from "@/components/angel/ClayBackdrop";
 import { useOnboardingStore } from "@/store/onboardingStore";
 import { useProfileStore } from "@/store/profileStore";
 import { useAuthStore } from "@/store/authStore";
-import { Colors } from "@/constants/colors";
+import { getApiUrl } from "@/lib/api";
 import { Fonts } from "@/constants/fonts";
+import { ClayShadows, ClayTheme } from "@/constants/clayTheme";
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000";
+const API_URL = getApiUrl();
 
 export default function Step5Photo() {
   const { data, setData, reset } = useOnboardingStore();
@@ -124,23 +126,35 @@ export default function Step5Photo() {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: Colors.night }}
+      style={{ flex: 1, backgroundColor: ClayTheme.canvas }}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
+      <ClayBackdrop />
       <ScrollView
-        contentContainerStyle={{ flexGrow: 1, padding: 24, gap: 28 }}
+        contentContainerStyle={{ flexGrow: 1, padding: 20, gap: 20 }}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        <ProgressBar currentStep={5} totalSteps={5} />
+        <View
+          style={{
+            borderRadius: 34,
+            backgroundColor: ClayTheme.card,
+            borderWidth: 1,
+            borderColor: ClayTheme.border,
+            padding: 20,
+            ...ClayShadows.card,
+          }}
+        >
+          <ProgressBar currentStep={5} totalSteps={5} />
 
-        <View style={{ gap: 24, alignItems: "center" }}>
+          <View style={{ gap: 24, alignItems: "center", marginTop: 14 }}>
           <View style={{ gap: 8, alignItems: "center" }}>
             <Text
               style={{
                 fontFamily: Fonts.display,
-                fontSize: 22,
-                color: Colors.textPrimary,
-                letterSpacing: 1,
+                fontSize: 24,
+                color: ClayTheme.text,
+                letterSpacing: 0.8,
                 textAlign: "center",
               }}
             >
@@ -149,9 +163,9 @@ export default function Step5Photo() {
             <Text
               style={{
                 fontFamily: Fonts.body,
-                fontSize: 14,
-                color: Colors.textMuted,
-                lineHeight: 22,
+                fontSize: 15,
+                color: ClayTheme.muted,
+                lineHeight: 24,
                 textAlign: "center",
                 fontStyle: "italic",
               }}
@@ -167,11 +181,12 @@ export default function Step5Photo() {
               height: 160,
               borderRadius: 80,
               borderWidth: 2,
-              borderColor: photoUri ? Colors.gold : Colors.goldBorder,
-              backgroundColor: Colors.surface,
+              borderColor: photoUri ? ClayTheme.gold : ClayTheme.border,
+              backgroundColor: ClayTheme.input,
               overflow: "hidden",
               alignItems: "center",
               justifyContent: "center",
+              ...ClayShadows.card,
             }}
           >
             {photoUri ? (
@@ -183,7 +198,8 @@ export default function Step5Photo() {
               <Text
                 style={{
                   fontSize: 48,
-                  opacity: 0.3,
+                  opacity: 0.5,
+                  color: ClayTheme.gold,
                 }}
               >
                 ✦
@@ -201,7 +217,7 @@ export default function Step5Photo() {
             style={{
               fontFamily: Fonts.body,
               fontSize: 13,
-              color: Colors.error,
+              color: "#FF8787",
               textAlign: "center",
               lineHeight: 20,
             }}
@@ -210,9 +226,9 @@ export default function Step5Photo() {
           </Text>
         ) : null}
 
-        <View style={{ marginTop: "auto", gap: 12 }}>
+        <View style={{ marginTop: 20, gap: 12 }}>
           <Button
-            variant="primary"
+            variant="clayPrimary"
             onPress={() => handleComplete(false)}
             loading={loading}
             fullWidth
@@ -225,6 +241,7 @@ export default function Step5Photo() {
               onPress={() => handleComplete(true)}
               disabled={loading}
               fullWidth
+              textStyle={{ color: ClayTheme.accent }}
             >
               Skip
             </Button>
@@ -234,9 +251,11 @@ export default function Step5Photo() {
             onPress={() => router.back()}
             disabled={loading}
             fullWidth
+            textStyle={{ color: ClayTheme.muted }}
           >
             Back
           </Button>
+        </View>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>

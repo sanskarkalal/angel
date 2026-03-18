@@ -13,9 +13,11 @@ import { router } from "expo-router";
 import { useEffect } from "react";
 import * as WebBrowser from "expo-web-browser";
 import { makeRedirectUri } from "expo-auth-session";
+import Constants from "expo-constants";
 import { supabase } from "@/lib/supabase";
-import { Colors } from "@/constants/colors";
 import { Fonts } from "@/constants/fonts";
+import { ClayBackdrop } from "@/components/angel/ClayBackdrop";
+import { ClayShadows, ClayTheme } from "@/constants/clayTheme";
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -30,19 +32,6 @@ function parseParams(input: string) {
   }
 
   return params;
-}
-
-function upsertQueryParam(url: string, key: string, value: string) {
-  const [base, hashPart = ""] = url.split("#");
-  const [path, queryPart = ""] = base.split("?");
-  const current = parseParams(queryPart);
-  current[key] = value;
-
-  const nextQuery = Object.entries(current)
-    .map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
-    .join("&");
-
-  return `${path}?${nextQuery}${hashPart ? `#${hashPart}` : ""}`;
 }
 
 function extractOAuthParams(url: string) {
@@ -64,41 +53,42 @@ function extractOAuthParams(url: string) {
 
 function AngelLogo() {
   return (
-    <View style={{ alignItems: "center", gap: 16, marginBottom: 48 }}>
+    <View style={{ alignItems: "center", gap: 14, marginBottom: 36 }}>
       <View
         style={{
-          width: 88,
-          height: 88,
-          borderRadius: 44,
-          borderWidth: 1.5,
-          borderColor: Colors.goldBorder,
-          backgroundColor: Colors.goldSurface,
+          width: 96,
+          height: 96,
+          borderRadius: 48,
+          borderWidth: 1,
+          borderColor: ClayTheme.border,
+          backgroundColor: ClayTheme.cardRaised,
           alignItems: "center",
           justifyContent: "center",
+          ...ClayShadows.card,
         }}
       >
         <View
           style={{
-            width: 56,
-            height: 56,
-            borderRadius: 28,
+            width: 62,
+            height: 62,
+            borderRadius: 31,
             borderWidth: 1,
-            borderColor: Colors.gold,
-            backgroundColor: "rgba(201,168,76,0.12)",
+            borderColor: ClayTheme.gold,
+            backgroundColor: "rgba(232,205,138,0.12)",
             alignItems: "center",
             justifyContent: "center",
           }}
         >
-          <Text style={{ fontSize: 24 }}>*</Text>
+          <Text style={{ fontSize: 24, color: ClayTheme.gold }}>✦</Text>
         </View>
       </View>
 
       <Text
         style={{
           fontFamily: Fonts.display,
-          fontSize: 36,
-          color: Colors.gold,
-          letterSpacing: 8,
+          fontSize: 40,
+          color: ClayTheme.text,
+          letterSpacing: 6,
           textTransform: "uppercase",
         }}
       >
@@ -107,9 +97,9 @@ function AngelLogo() {
       <Text
         style={{
           fontFamily: Fonts.body,
-          fontSize: 13,
-          color: Colors.textMuted,
-          letterSpacing: 3,
+          fontSize: 14,
+          color: ClayTheme.muted,
+          letterSpacing: 1.4,
         }}
       >
         Your guardian. Always with you.
@@ -145,7 +135,7 @@ export default function LoginScreen() {
       return false;
     }
 
-    router.replace("/(tabs)");
+    router.replace("/onboarding/step1-name");
     return true;
   }
 
@@ -165,14 +155,17 @@ export default function LoginScreen() {
     setLoading(true);
 
     try {
+      const isExpoGo = Constants.appOwnership === "expo";
       const redirectTo =
         Platform.OS === "web"
           ? makeRedirectUri({ path: "auth/callback" })
-          : makeRedirectUri({
-              scheme: "angel",
-              path: "auth/callback",
-              preferLocalhost: true,
-            });
+          : isExpoGo
+            ? makeRedirectUri({ path: "auth/callback" })
+            : makeRedirectUri({
+                scheme: "angel",
+                path: "auth/callback",
+                preferLocalhost: true,
+              });
 
       if (Platform.OS === "web") {
         const { error } = await supabase.auth.signInWithOAuth({
@@ -205,9 +198,7 @@ export default function LoginScreen() {
         setGeneralError("Google sign-in URL was not returned.");
         return;
       }
-      const oauthUrl = upsertQueryParam(data.url, "redirect_to", redirectTo);
-
-      const result = await WebBrowser.openAuthSessionAsync(oauthUrl, redirectTo);
+      const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
       if (result.type !== "success") {
         setGeneralError("Google sign-in was canceled.");
         setLoading(false);
@@ -231,9 +222,10 @@ export default function LoginScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: Colors.night }}
+      style={{ flex: 1, backgroundColor: ClayTheme.canvas }}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
+      <ClayBackdrop />
       <ScrollView
         contentContainerStyle={{
           flexGrow: 1,
@@ -241,68 +233,85 @@ export default function LoginScreen() {
           padding: 24,
         }}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        <AngelLogo />
+        <View
+          style={{
+            borderRadius: 34,
+            padding: 24,
+            borderWidth: 1,
+            borderColor: ClayTheme.border,
+            backgroundColor: ClayTheme.card,
+            ...ClayShadows.card,
+          }}
+        >
+          <AngelLogo />
 
-        <View style={{ gap: 16 }}>
-          <Text
-            style={{
-              fontFamily: Fonts.body,
-              fontSize: 14,
-              color: Colors.textSecondary,
-              textAlign: "center",
-              lineHeight: 22,
-            }}
-          >
-            Sign in with Google to continue.
-          </Text>
-
-          {generalError ? (
+          <View style={{ gap: 16 }}>
             <Text
               style={{
                 fontFamily: Fonts.body,
-                fontSize: 13,
-                color: Colors.error,
+                fontSize: 15,
+                color: ClayTheme.muted,
                 textAlign: "center",
-                lineHeight: 20,
+                lineHeight: 24,
               }}
             >
-              {generalError}
+              Sign in with Google to continue.
             </Text>
-          ) : null}
 
-          <Pressable
-            onPress={handleGoogleSignIn}
-            disabled={loading}
-            style={({ pressed }) => ({
-              marginTop: 8,
-              width: "100%",
-              minHeight: 54,
-              borderRadius: 14,
-              borderWidth: 1,
-              borderColor: "#E5E7EB",
-              backgroundColor: "#FFFFFF",
-              paddingHorizontal: 18,
-              alignItems: "center",
-              justifyContent: "center",
-              opacity: loading ? 0.7 : pressed ? 0.9 : 1,
-            })}
-          >
-            {loading ? (
-              <ActivityIndicator size="small" color="#202124" />
-            ) : (
+            {generalError ? (
               <Text
                 style={{
-                  fontFamily: Fonts.bodyBold,
-                  fontSize: 16,
-                  letterSpacing: 0.2,
-                  color: "#202124",
+                  fontFamily: Fonts.body,
+                  fontSize: 13,
+                  color: "#FF8787",
+                  textAlign: "center",
+                  lineHeight: 20,
                 }}
               >
-                Continue with Google
+                {generalError}
               </Text>
-            )}
-          </Pressable>
+            ) : null}
+
+            <Pressable
+              onPress={handleGoogleSignIn}
+              disabled={loading}
+              style={({ pressed }) => ({
+                marginTop: 8,
+                width: "100%",
+                minHeight: 58,
+                borderRadius: 20,
+                borderWidth: 1,
+                borderColor: "rgba(255,255,255,0.65)",
+                backgroundColor: ClayTheme.white,
+                paddingHorizontal: 18,
+                alignItems: "center",
+                justifyContent: "center",
+                opacity: loading ? 0.7 : pressed ? 0.9 : 1,
+                shadowColor: "#0D0718",
+                shadowOffset: { width: 0, height: 10 },
+                shadowOpacity: 0.35,
+                shadowRadius: 18,
+                elevation: 12,
+              })}
+            >
+              {loading ? (
+                <ActivityIndicator size="small" color={ClayTheme.darkText} />
+              ) : (
+                <Text
+                  style={{
+                    fontFamily: Fonts.bodyBold,
+                    fontSize: 16,
+                    letterSpacing: 0.2,
+                    color: ClayTheme.darkText,
+                  }}
+                >
+                  Continue with Google
+                </Text>
+              )}
+            </Pressable>
+          </View>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>

@@ -14,14 +14,15 @@ import DateTimePicker, {
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ProgressBar } from "@/components/angel/ProgressBar";
+import { ClayBackdrop } from "@/components/angel/ClayBackdrop";
 import { useOnboardingStore } from "@/store/onboardingStore";
-import { Colors } from "@/constants/colors";
 import { Fonts } from "@/constants/fonts";
+import { ClayShadows, ClayTheme } from "@/constants/clayTheme";
 
 export default function Step2Birth() {
   const { data, setData } = useOnboardingStore();
   const [birthDate, setBirthDate] = useState<Date>(
-    data.birth_date ? new Date(data.birth_date) : new Date(1995, 0, 1)
+    data.birth_date ? new Date(data.birth_date) : new Date(1995, 0, 1),
   );
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [birthTime, setBirthTime] = useState(data.birth_time ?? "");
@@ -51,118 +52,132 @@ export default function Step2Birth() {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: Colors.night }}
+      style={{ flex: 1, backgroundColor: ClayTheme.canvas }}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
+      <ClayBackdrop />
       <ScrollView
-        contentContainerStyle={{ flexGrow: 1, padding: 24, gap: 28 }}
+        contentContainerStyle={{ flexGrow: 1, padding: 20, gap: 20 }}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        <ProgressBar currentStep={2} totalSteps={5} />
+        <View
+          style={{
+            borderRadius: 34,
+            backgroundColor: ClayTheme.card,
+            borderWidth: 1,
+            borderColor: ClayTheme.border,
+            padding: 20,
+            ...ClayShadows.card,
+          }}
+        >
+          <ProgressBar currentStep={2} totalSteps={5} />
 
-        <View style={{ gap: 24 }}>
-          <View style={{ gap: 8 }}>
-            <Text
-              style={{
-                fontFamily: Fonts.display,
-                fontSize: 22,
-                color: Colors.textPrimary,
-                letterSpacing: 1,
-                lineHeight: 32,
-              }}
-            >
-              When did you arrive?
-            </Text>
-            <Text
-              style={{
-                fontFamily: Fonts.body,
-                fontSize: 14,
-                color: Colors.textMuted,
-                lineHeight: 22,
-                fontStyle: "italic",
-              }}
-            >
-              The stars remember the moment you arrived.
-            </Text>
-          </View>
-
-          <View style={{ gap: 20 }}>
-            {/* Birth Date */}
+          <View style={{ gap: 24, marginTop: 14 }}>
             <View style={{ gap: 8 }}>
               <Text
                 style={{
-                  fontFamily: Fonts.bodyBold,
-                  fontSize: 11,
-                  color: Colors.textMuted,
-                  letterSpacing: 1.2,
-                  textTransform: "uppercase",
+                  fontFamily: Fonts.display,
+                  fontSize: 24,
+                  color: ClayTheme.text,
+                  letterSpacing: 0.8,
+                  lineHeight: 34,
                 }}
               >
-                Birth Date
+                When did you arrive?
               </Text>
-              <Pressable
-                onPress={() => setShowDatePicker(true)}
+              <Text
                 style={{
-                  backgroundColor: Colors.surface,
-                  borderWidth: 1,
-                  borderColor: Colors.border,
-                  borderRadius: 10,
-                  paddingVertical: 14,
-                  paddingHorizontal: 16,
+                  fontFamily: Fonts.body,
+                  fontSize: 15,
+                  color: ClayTheme.muted,
+                  lineHeight: 24,
+                  fontStyle: "italic",
                 }}
               >
-                <Text
-                  style={{
-                    fontFamily: Fonts.body,
-                    fontSize: 15,
-                    color: Colors.textPrimary,
-                  }}
-                >
-                  {formatDate(birthDate)}
-                </Text>
-              </Pressable>
+                The stars remember the moment you arrived.
+              </Text>
             </View>
 
-            {showDatePicker && (
-              <DateTimePicker
-                value={birthDate}
-                mode="date"
-                display={Platform.OS === "ios" ? "spinner" : "default"}
-                onChange={handleDateChange}
-                maximumDate={new Date()}
-                themeVariant="dark"
+            <View style={{ gap: 20 }}>
+              {/* Birth Date */}
+              <View style={{ gap: 8 }}>
+                <Text
+                  style={{
+                    fontFamily: Fonts.bodyBold,
+                    fontSize: 11,
+                    color: ClayTheme.muted,
+                    letterSpacing: 1.4,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Birth Date
+                </Text>
+                <Pressable
+                  onPress={() => setShowDatePicker(true)}
+                  style={{
+                    backgroundColor: ClayTheme.input,
+                    borderWidth: 1,
+                    borderColor: ClayTheme.inputBorder,
+                    borderRadius: 20,
+                    paddingVertical: 16,
+                    paddingHorizontal: 18,
+                  }}
+                >
+                  <Text
+                    style={{
+                      fontFamily: Fonts.body,
+                      fontSize: 16,
+                      color: ClayTheme.text,
+                    }}
+                  >
+                    {formatDate(birthDate)}
+                  </Text>
+                </Pressable>
+              </View>
+
+              {showDatePicker && (
+                <DateTimePicker
+                  value={birthDate}
+                  mode="date"
+                  display={Platform.OS === "ios" ? "spinner" : "default"}
+                  onChange={handleDateChange}
+                  maximumDate={new Date()}
+                  themeVariant="dark"
+                />
+              )}
+
+              <Input
+                label="Birth Time (optional)"
+                placeholder="e.g. 3:42 PM"
+                value={birthTime}
+                onChangeText={setBirthTime}
+                keyboardType="default"
               />
-            )}
 
-            <Input
-              label="Birth Time (optional)"
-              placeholder="e.g. 3:42 PM"
-              value={birthTime}
-              onChangeText={setBirthTime}
-              keyboardType="default"
-            />
-
-            <Input
-              label="Birth City (optional)"
-              placeholder="e.g. Mumbai, India"
-              value={birthCity}
-              onChangeText={setBirthCity}
-              autoCapitalize="words"
-            />
+              <Input
+                label="Birth City (optional)"
+                placeholder="e.g. Mumbai, India"
+                value={birthCity}
+                onChangeText={setBirthCity}
+                autoCapitalize="words"
+              />
+            </View>
           </View>
-        </View>
 
-        <View style={{ marginTop: "auto", gap: 12 }}>
-          <Button variant="primary" onPress={handleNext} fullWidth>
-            Continue
-          </Button>
-          <Button
-            variant="ghost"
-            onPress={() => router.back()}
-            fullWidth
-          >
-            Back
-          </Button>
+          <View style={{ marginTop: 20, gap: 12 }}>
+            <Button variant="clayPrimary" onPress={handleNext} fullWidth>
+              Next
+            </Button>
+            <Button
+              variant="ghost"
+              onPress={() => router.back()}
+              fullWidth
+              textStyle={{ color: ClayTheme.muted }}
+            >
+              Back
+            </Button>
+          </View>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>

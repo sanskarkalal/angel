@@ -1,7 +1,7 @@
 import "../global.css";
 
 import React, { useEffect } from "react";
-import { Stack, router } from "expo-router";
+import { Stack, router, useSegments } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { View, ActivityIndicator } from "react-native";
 import {
@@ -23,6 +23,8 @@ import { Colors } from "@/constants/colors";
 function RootLayoutContent() {
   const { user, loading: authLoading } = useAuth();
   const { profile, loading: profileLoading } = useProfileStore();
+  const segments = useSegments();
+  const inOnboarding = segments[0] === "onboarding";
 
   const isLoading = authLoading || (!!user && profileLoading);
 
@@ -35,7 +37,9 @@ function RootLayoutContent() {
     }
 
     if (profile && !profile.onboarding_complete) {
-      router.replace("/onboarding/step1-name");
+      if (!inOnboarding) {
+        router.replace("/onboarding/step1-name");
+      }
       return;
     }
 
@@ -46,9 +50,11 @@ function RootLayoutContent() {
 
     // Profile not yet created — go to onboarding
     if (user && profile === null && !profileLoading) {
-      router.replace("/onboarding/step1-name");
+      if (!inOnboarding) {
+        router.replace("/onboarding/step1-name");
+      }
     }
-  }, [isLoading, user, profile, profileLoading]);
+  }, [inOnboarding, isLoading, user, profile, profileLoading]);
 
   if (isLoading) {
     return (

@@ -114,7 +114,7 @@ export default function TodayScreen() {
     if (!reply.trim()) return;
     const message = reply.trim();
     setReply("");
-    await readingHook.sendReply(message);
+    await readingHook.sendReply(message, cachedReading?.id ?? undefined);
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 200);
   }
 

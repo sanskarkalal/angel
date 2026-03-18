@@ -1,7 +1,8 @@
 import { useEffect } from "react";
 import { ActivityIndicator, View } from "react-native";
 import { router } from "expo-router";
-import { Colors } from "@/constants/colors";
+import { ClayBackdrop } from "@/components/angel/ClayBackdrop";
+import { ClayShadows, ClayTheme } from "@/constants/clayTheme";
 
 export default function SignupScreen() {
   useEffect(() => {
@@ -14,10 +15,25 @@ export default function SignupScreen() {
         flex: 1,
         alignItems: "center",
         justifyContent: "center",
-        backgroundColor: Colors.night,
+        backgroundColor: ClayTheme.canvas,
       }}
     >
-      <ActivityIndicator size="large" color={Colors.gold} />
+      <ClayBackdrop />
+      <View
+        style={{
+          width: 88,
+          height: 88,
+          borderRadius: 44,
+          alignItems: "center",
+          justifyContent: "center",
+          backgroundColor: ClayTheme.cardRaised,
+          borderWidth: 1,
+          borderColor: ClayTheme.border,
+          ...ClayShadows.card,
+        }}
+      >
+        <ActivityIndicator size="large" color={ClayTheme.accent} />
+      </View>
     </View>
   );
 }

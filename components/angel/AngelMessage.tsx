@@ -1,7 +1,7 @@
 import React from "react";
 import { View, Text } from "react-native";
-import { Colors } from "@/constants/colors";
 import { Fonts } from "@/constants/fonts";
+import { ClayShadows, ClayTheme } from "@/constants/clayTheme";
 
 interface AngelMessageProps {
   message: string;
@@ -12,20 +12,21 @@ export function AngelMessage({ message }: AngelMessageProps) {
   return (
     <View
       style={{
-        backgroundColor: Colors.goldSurface,
-        borderLeftWidth: 2,
-        borderLeftColor: Colors.gold,
-        borderRadius: 8,
-        paddingVertical: 12,
-        paddingHorizontal: 16,
+        backgroundColor: ClayTheme.cardRaised,
+        borderWidth: 1,
+        borderColor: ClayTheme.border,
+        borderRadius: 24,
+        paddingVertical: 14,
+        paddingHorizontal: 18,
         marginVertical: 4,
+        ...ClayShadows.card,
       }}
     >
       <Text
         style={{
           fontFamily: Fonts.body,
           fontSize: 14,
-          color: Colors.textSecondary,
+          color: ClayTheme.muted,
           lineHeight: 22,
           fontStyle: "italic",
           letterSpacing: 0.2,

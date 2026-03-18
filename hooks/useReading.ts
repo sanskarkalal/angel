@@ -3,6 +3,7 @@ import { router } from "expo-router";
 import { useAuthStore } from "@/store/authStore";
 import { useProfileStore } from "@/store/profileStore";
 import { supabase } from "@/lib/supabase";
+import { getApiUrl } from "@/lib/api";
 
 interface Message {
   role: "angel" | "user";
@@ -26,11 +27,11 @@ interface ReadingState {
 
 interface UseReadingReturn extends ReadingState {
   startReading: () => Promise<void>;
-  sendReply: (message: string) => Promise<void>;
+  sendReply: (message: string, readingIdOverride?: string) => Promise<void>;
   retry: () => void;
 }
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "http://localhost:3000";
+const API_URL = getApiUrl();
 
 export function useReading(): UseReadingReturn {
   const { session, signOut } = useAuthStore();
@@ -84,10 +85,11 @@ export function useReading(): UseReadingReturn {
         }
 
         if (response.status === 429) {
-          // Cached reading returned
           const data = await response.json() as {
-            cached: boolean;
-            reading: {
+            cached?: boolean;
+            retryAfterSec?: number;
+            error?: string;
+            reading?: {
               id: string;
               card_name: string;
               card_arcana: string;
@@ -95,18 +97,28 @@ export function useReading(): UseReadingReturn {
               reading_text: string;
             }
           };
-          setState((s) => ({
-            ...s,
-            loading: false,
-            complete: true,
-            finalText: data.reading.reading_text,
-            streamingText: data.reading.reading_text,
-            cardName: data.reading.card_name,
-            cardArcana: data.reading.card_arcana,
-            cardReversed: data.reading.card_reversed,
-            readingId: data.reading.id,
-          }));
-          return;
+
+          if (data.cached && data.reading) {
+            const reading = data.reading;
+            setState((s) => ({
+              ...s,
+              loading: false,
+              complete: true,
+              finalText: reading.reading_text,
+              streamingText: reading.reading_text,
+              cardName: reading.card_name,
+              cardArcana: reading.card_arcana,
+              cardReversed: reading.card_reversed,
+              readingId: reading.id,
+            }));
+            return;
+          }
+
+          const waitText =
+            data.retryAfterSec && data.retryAfterSec > 0
+              ? ` Please try again in ${data.retryAfterSec}s.`
+              : "";
+          throw new Error((data.error ?? "Please try again in a moment.") + waitText);
         }
         throw new Error(`Server error: ${response.status}`);
       }
@@ -136,6 +148,7 @@ export function useReading(): UseReadingReturn {
             type?: string;
             text?: string;
             message?: string;
+            retryAfterSec?: number;
             card?: {
               name: string;
               arcana: string;
@@ -170,7 +183,11 @@ export function useReading(): UseReadingReturn {
           } else if (parsed.type === "done") {
             if (parsed.readingId) readingId = parsed.readingId;
           } else if (parsed.type === "error") {
-            throw new Error(parsed.message ?? "The connection wavered.");
+            const waitText =
+              parsed.retryAfterSec && parsed.retryAfterSec > 0
+                ? ` Please try again in ${parsed.retryAfterSec}s.`
+                : "";
+            throw new Error((parsed.message ?? "The connection wavered.") + waitText);
           }
         } catch (err) {
           if (err instanceof Error) {
@@ -205,18 +222,25 @@ export function useReading(): UseReadingReturn {
       }
 
       const decoder = new TextDecoder();
+      let sseBuffer = "";
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
 
         const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split("\n");
+        sseBuffer += chunk;
+        const lines = sseBuffer.split("\n");
+        sseBuffer = lines.pop() ?? "";
         let shouldStop = false;
         for (const line of lines) {
           shouldStop = processSseLine(line);
           if (shouldStop) break;
         }
         if (shouldStop) break;
+      }
+
+      if (sseBuffer.trim().length > 0) {
+        processSseLine(sseBuffer);
       }
     } catch (err) {
       const message =
@@ -232,8 +256,15 @@ export function useReading(): UseReadingReturn {
   }, [clearProfile, session, signOut]);
 
   const sendReply = useCallback(
-    async (message: string) => {
-      if (!session?.access_token || !state.readingId) return;
+    async (message: string, readingIdOverride?: string) => {
+      const activeReadingId = readingIdOverride ?? state.readingId;
+      if (!session?.access_token || !activeReadingId) {
+        setState((s) => ({
+          ...s,
+          error: "I lost the thread of this reading. Pull to refresh and try again.",
+        }));
+        return;
+      }
 
       const userMessage: Message = {
         role: "user",
@@ -257,7 +288,7 @@ export function useReading(): UseReadingReturn {
           },
           body: JSON.stringify({
             message,
-            readingId: state.readingId,
+            readingId: activeReadingId,
             history: state.conversation,
           }),
         });
@@ -270,7 +301,23 @@ export function useReading(): UseReadingReturn {
           throw new Error("Session expired. Please log in again.");
         }
 
-        if (!response.ok) throw new Error(`Chat error: ${response.status}`);
+        if (!response.ok) {
+          let message = `Chat error: ${response.status}`;
+          try {
+            const errorData = await response.json() as {
+              error?: string;
+              retryAfterSec?: number;
+            };
+            const waitText =
+              errorData.retryAfterSec && errorData.retryAfterSec > 0
+                ? ` Please try again in ${errorData.retryAfterSec}s.`
+                : "";
+            message = (errorData.error ?? message) + waitText;
+          } catch {
+            // Ignore parsing failure and keep status-based message.
+          }
+          throw new Error(message);
+        }
 
         const data = await response.json() as { reply: string };
         const angelMessage: Message = {

@@ -13,9 +13,10 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { ProgressBar } from "@/components/angel/ProgressBar";
 import { AngelMessage } from "@/components/angel/AngelMessage";
+import { ClayBackdrop } from "@/components/angel/ClayBackdrop";
 import { useOnboardingStore } from "@/store/onboardingStore";
-import { Colors } from "@/constants/colors";
 import { Fonts } from "@/constants/fonts";
+import { ClayShadows, ClayTheme } from "@/constants/clayTheme";
 
 const PRONOUN_OPTIONS = [
   "she/her",
@@ -54,105 +55,130 @@ export default function Step1Name() {
 
   return (
     <KeyboardAvoidingView
-      style={{ flex: 1, backgroundColor: Colors.night }}
+      style={{ flex: 1, backgroundColor: ClayTheme.canvas }}
       behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
+      <ClayBackdrop />
       <ScrollView
-        contentContainerStyle={{ flexGrow: 1, padding: 24, gap: 28 }}
+        contentContainerStyle={{
+          flexGrow: 1,
+          padding: 20,
+          gap: 20,
+        }}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
-        <ProgressBar currentStep={1} totalSteps={5} />
+        <View
+          style={{
+            borderRadius: 34,
+            backgroundColor: ClayTheme.card,
+            borderWidth: 1,
+            borderColor: ClayTheme.border,
+            padding: 20,
+            ...ClayShadows.card,
+          }}
+        >
+          <ProgressBar currentStep={1} totalSteps={5} />
 
-        <RNAnimated.View style={{ opacity: messageOpacity, gap: 24, flex: 1 }}>
-          <AngelMessage message="I have been waiting for you. Step into this space slowly — there is no rush here." />
+          <RNAnimated.View style={{ opacity: messageOpacity, gap: 20, marginTop: 14 }}>
+            <AngelMessage message="I have been waiting for you. Step into this space slowly — there is no rush here." />
 
-          <View style={{ gap: 8 }}>
-            <Text
-              style={{
-                fontFamily: Fonts.display,
-                fontSize: 22,
-                color: Colors.textPrimary,
-                letterSpacing: 1,
-                lineHeight: 32,
-              }}
-            >
-              What shall I call you?
-            </Text>
-            <Text
-              style={{
-                fontFamily: Fonts.body,
-                fontSize: 14,
-                color: Colors.textMuted,
-                lineHeight: 22,
-              }}
-            >
-              The name you carry into your truest self.
-            </Text>
-          </View>
-
-          <View style={{ gap: 20 }}>
-            <Input
-              label="Your name"
-              placeholder="Name"
-              value={name}
-              onChangeText={setName}
-              autoCapitalize="words"
-              autoComplete="name"
-              error={nameError}
-            />
-
-            <View style={{ gap: 10 }}>
+            <View style={{ gap: 8 }}>
               <Text
                 style={{
-                  fontFamily: Fonts.bodyBold,
-                  fontSize: 11,
-                  color: Colors.textMuted,
-                  letterSpacing: 1.2,
-                  textTransform: "uppercase",
+                  fontFamily: Fonts.display,
+                  fontSize: 24,
+                  color: ClayTheme.text,
+                  letterSpacing: 0.8,
+                  lineHeight: 34,
                 }}
               >
-                Pronouns (optional)
+                What shall I call you?
               </Text>
-              <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
-                {PRONOUN_OPTIONS.map((option) => (
-                  <Pressable
-                    key={option}
-                    onPress={() => setPronouns(pronouns === option ? "" : option)}
-                    style={{
-                      paddingVertical: 7,
-                      paddingHorizontal: 14,
-                      borderRadius: 20,
-                      borderWidth: 1,
-                      borderColor:
-                        pronouns === option ? Colors.gold : Colors.border,
-                      backgroundColor:
-                        pronouns === option ? Colors.goldSurface : Colors.surface,
-                    }}
-                  >
-                    <Text
+              <Text
+                style={{
+                  fontFamily: Fonts.body,
+                  fontSize: 15,
+                  color: ClayTheme.muted,
+                  lineHeight: 24,
+                }}
+              >
+                The name you carry into your truest self.
+              </Text>
+            </View>
+
+            <View style={{ gap: 20 }}>
+              <Input
+                label="Your name"
+                placeholder="Name"
+                value={name}
+                onChangeText={setName}
+                autoCapitalize="words"
+                autoComplete="name"
+                error={nameError}
+              />
+
+              <View style={{ gap: 10 }}>
+                <Text
+                  style={{
+                    fontFamily: Fonts.bodyBold,
+                    fontSize: 11,
+                    color: ClayTheme.muted,
+                    letterSpacing: 1.4,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Pronouns (optional)
+                </Text>
+                <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+                  {PRONOUN_OPTIONS.map((option) => (
+                    <Pressable
+                      key={option}
+                      onPress={() =>
+                        setPronouns(pronouns === option ? "" : option)
+                      }
                       style={{
-                        fontFamily: Fonts.body,
-                        fontSize: 13,
-                        color:
+                        paddingVertical: 8,
+                        paddingHorizontal: 15,
+                        borderRadius: 999,
+                        borderWidth: 1,
+                        borderColor:
+                          pronouns === option ? ClayTheme.gold : ClayTheme.inputBorder,
+                        backgroundColor:
                           pronouns === option
-                            ? Colors.gold
-                            : Colors.textSecondary,
+                            ? "rgba(232,205,138,0.12)"
+                            : ClayTheme.input,
                       }}
                     >
-                      {option}
-                    </Text>
-                  </Pressable>
-                ))}
+                      <Text
+                        style={{
+                          fontFamily: Fonts.body,
+                          fontSize: 13,
+                          color:
+                            pronouns === option
+                              ? ClayTheme.gold
+                              : ClayTheme.muted,
+                        }}
+                      >
+                        {option}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
               </View>
             </View>
-          </View>
 
-          <View style={{ marginTop: "auto", gap: 12 }}>
-            <Button variant="primary" onPress={handleNext} fullWidth>
-              Continue
-            </Button>
-          </View>
-        </RNAnimated.View>
+            <View style={{ gap: 12 }}>
+              <Button
+                variant="clayPrimary"
+                onPress={handleNext}
+                fullWidth
+              >
+                Next
+              </Button>
+            </View>
+          </RNAnimated.View>
+        </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
