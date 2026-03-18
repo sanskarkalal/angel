@@ -12,6 +12,7 @@ let globalProviderCooldownUntil = 0;
 
 const MIN_USER_RETRY_SECONDS = 15;
 const DEFAULT_QUOTA_RETRY_SECONDS = 60;
+const HISTORY_TEXT_LIMIT = 260;
 
 function extractRetryAfterSeconds(err: unknown): number | null {
   if (!err || typeof err !== "object") return null;
@@ -63,6 +64,58 @@ function isSpendingCapError(err: unknown): boolean {
   const maybeAny = err as { message?: string };
   const msg = (maybeAny.message ?? "").toLowerCase();
   return msg.includes("spending cap");
+}
+
+type ConversationMessage = {
+  role: "user" | "angel" | "model" | string;
+  content: string;
+  timestamp?: string;
+};
+
+function compactText(input: string, maxLen = HISTORY_TEXT_LIMIT): string {
+  const clean = input.replace(/\s+/g, " ").trim();
+  if (clean.length <= maxLen) return clean;
+  return `${clean.slice(0, maxLen - 1)}…`;
+}
+
+function summariseConversation(messages: ConversationMessage[]): string {
+  if (!messages.length) {
+    return "No conversation saved for this reading yet.";
+  }
+  const userMessages = messages.filter((m) => m.role === "user" && m.content?.trim());
+  const angelMessages = messages.filter(
+    (m) => (m.role === "angel" || m.role === "model") && m.content?.trim()
+  );
+
+  const latestUser = userMessages[userMessages.length - 1]?.content ?? "";
+  const latestAngel = angelMessages[angelMessages.length - 1]?.content ?? "";
+  const focus =
+    latestUser && latestAngel
+      ? `They last asked about "${compactText(latestUser, 110)}" and Angel answered "${compactText(latestAngel, 130)}".`
+      : latestUser
+        ? `Their latest message was "${compactText(latestUser, 170)}".`
+        : `Angel shared "${compactText(latestAngel, 170)}".`;
+
+  return `${messages.length} total messages. ${focus}`;
+}
+
+function summariseArchive(
+  items: Array<{ readingDate: string; cardName: string; messageCount: number; summary: string }>
+): string {
+  if (!items.length) {
+    return "No past readings yet.";
+  }
+  const totalMessages = items.reduce((sum, item) => sum + item.messageCount, 0);
+  const cards = Array.from(new Set(items.map((item) => item.cardName))).slice(0, 5);
+  const latest = items[0];
+
+  return [
+    `You have ${items.length} saved reading${items.length === 1 ? "" : "s"} with ${totalMessages} total chat message${totalMessages === 1 ? "" : "s"}.`,
+    `Recent focus: ${latest.cardName} on ${latest.readingDate}.`,
+    cards.length > 0 ? `Cards showing up lately: ${cards.join(", ")}.` : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 // ========== Tarot deck (inline for server use) ==========
@@ -352,6 +405,146 @@ router.get("/chat/history", async (req: Request, res: Response): Promise<void> =
   }
 
   res.json({ messages: data?.messages ?? [] });
+});
+
+router.get("/chat/archive", async (req: Request, res: Response): Promise<void> => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith("Bearer ")) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const token = authHeader.slice(7);
+  const user = await getUserFromToken(token);
+  if (!user) {
+    res.status(401).json({ error: "Invalid token" });
+    return;
+  }
+
+  const { data: readings, error: readingsError } = await supabaseAdmin
+    .from("daily_readings")
+    .select("id, reading_date, card_name, card_arcana, card_reversed, reading_text, created_at")
+    .eq("user_id", user.id)
+    .order("reading_date", { ascending: false });
+
+  if (readingsError) {
+    console.error("Archive readings fetch error:", readingsError);
+    res.status(500).json({ error: "Failed to load archive." });
+    return;
+  }
+
+  if (!readings || readings.length === 0) {
+    res.json({ overallSummary: "No past readings yet.", items: [] });
+    return;
+  }
+
+  const { data: conversations, error: conversationsError } = await supabaseAdmin
+    .from("conversations")
+    .select("reading_id, messages, updated_at")
+    .eq("user_id", user.id);
+
+  if (conversationsError) {
+    console.error("Archive conversations fetch error:", conversationsError);
+    res.status(500).json({ error: "Failed to load archive." });
+    return;
+  }
+
+  const convoByReadingId = new Map<string, { messages: ConversationMessage[]; updatedAt: string | null }>();
+  for (const conv of conversations ?? []) {
+    const readingId = String((conv as { reading_id?: string }).reading_id ?? "").trim();
+    if (!readingId) continue;
+    const messages =
+      ((conv as { messages?: ConversationMessage[] }).messages ?? []).filter(
+        (m) => m && typeof m.content === "string"
+      );
+    const updatedAt = (conv as { updated_at?: string | null }).updated_at ?? null;
+    convoByReadingId.set(readingId, { messages, updatedAt });
+  }
+
+  const items = readings.map((reading) => {
+    const readingId = String((reading as { id?: string }).id ?? "");
+    const convo = convoByReadingId.get(readingId);
+    const messages = convo?.messages ?? [];
+    const summary = summariseConversation(messages);
+
+    return {
+      readingId,
+      readingDate: String((reading as { reading_date?: string }).reading_date ?? ""),
+      cardName: String((reading as { card_name?: string }).card_name ?? ""),
+      cardArcana: String((reading as { card_arcana?: string }).card_arcana ?? ""),
+      cardReversed: Boolean((reading as { card_reversed?: boolean }).card_reversed),
+      readingPreview: compactText(String((reading as { reading_text?: string }).reading_text ?? ""), 220),
+      messageCount: messages.length,
+      summary,
+      lastMessageAt: convo?.updatedAt ?? null,
+    };
+  });
+
+  res.json({
+    overallSummary: summariseArchive(
+      items.map((item) => ({
+        readingDate: item.readingDate,
+        cardName: item.cardName,
+        messageCount: item.messageCount,
+        summary: item.summary,
+      }))
+    ),
+    items,
+  });
+});
+
+router.get("/chat/archive/:readingId", async (req: Request, res: Response): Promise<void> => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith("Bearer ")) {
+    res.status(401).json({ error: "Unauthorized" });
+    return;
+  }
+
+  const token = authHeader.slice(7);
+  const user = await getUserFromToken(token);
+  if (!user) {
+    res.status(401).json({ error: "Invalid token" });
+    return;
+  }
+
+  const readingId = String(req.params.readingId ?? "").trim();
+  if (!readingId) {
+    res.status(400).json({ error: "readingId is required" });
+    return;
+  }
+
+  const { data: reading, error: readingError } = await supabaseAdmin
+    .from("daily_readings")
+    .select("id, reading_date, card_name, card_arcana, card_reversed, reading_text")
+    .eq("id", readingId)
+    .eq("user_id", user.id)
+    .single();
+
+  if (readingError || !reading) {
+    res.status(404).json({ error: "Reading not found" });
+    return;
+  }
+
+  const { data: conversation } = await supabaseAdmin
+    .from("conversations")
+    .select("messages, updated_at")
+    .eq("reading_id", readingId)
+    .eq("user_id", user.id)
+    .maybeSingle<{ messages: ConversationMessage[]; updated_at: string | null }>();
+
+  const messages = conversation?.messages ?? [];
+  res.json({
+    reading: {
+      id: (reading as { id?: string }).id ?? readingId,
+      readingDate: (reading as { reading_date?: string }).reading_date ?? "",
+      cardName: (reading as { card_name?: string }).card_name ?? "",
+      cardArcana: (reading as { card_arcana?: string }).card_arcana ?? "",
+      cardReversed: Boolean((reading as { card_reversed?: boolean }).card_reversed),
+      readingText: (reading as { reading_text?: string }).reading_text ?? "",
+    },
+    summary: summariseConversation(messages),
+    messages,
+  });
 });
 
 router.post("/chat", async (req: Request, res: Response): Promise<void> => {

@@ -9,7 +9,6 @@ import {
   Pressable,
   ActivityIndicator,
 } from "react-native";
-import { router } from "expo-router";
 import { useEffect } from "react";
 import * as WebBrowser from "expo-web-browser";
 import { makeRedirectUri } from "expo-auth-session";
@@ -135,7 +134,6 @@ export default function LoginScreen() {
       return false;
     }
 
-    router.replace("/onboarding/step1-name");
     return true;
   }
 

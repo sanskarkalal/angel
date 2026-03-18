@@ -43,11 +43,15 @@ export function useAuth() {
   }, []);
 
   async function fetchProfile(userId: string) {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
     try {
+      const controller = new AbortController();
+      timeoutId = setTimeout(() => controller.abort(), 12000);
       const { data, error } = await supabase
         .from("user_profiles")
         .select("*")
         .eq("user_id", userId)
+        .abortSignal(controller.signal)
         .single();
 
       if (error) {
@@ -86,6 +90,7 @@ export function useAuth() {
       setProfileLoading(false);
       setAuthLoading(false);
     } finally {
+      if (timeoutId) clearTimeout(timeoutId);
       setProfileLoading(false);
       setAuthLoading(false);
     }

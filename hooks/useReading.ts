@@ -68,6 +68,8 @@ export function useReading(): UseReadingReturn {
       finalText: "",
       streaming: false,
       complete: false,
+      conversation: [],
+      readingId: null,
     }));
 
     try {
