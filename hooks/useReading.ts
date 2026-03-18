@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import { router } from "expo-router";
 import { useAuthStore } from "@/store/authStore";
 import { useProfileStore } from "@/store/profileStore";
@@ -49,12 +49,15 @@ export function useReading(): UseReadingReturn {
     conversation: [],
     readingId: null,
   });
+  const readingRequestInFlightRef = useRef(false);
 
   const startReading = useCallback(async () => {
+    if (readingRequestInFlightRef.current) return;
     if (!session?.access_token) {
       setState((s) => ({ ...s, error: "Not authenticated", loading: false }));
       return;
     }
+    readingRequestInFlightRef.current = true;
 
     setState((s) => ({
       ...s,
@@ -187,7 +190,13 @@ export function useReading(): UseReadingReturn {
               parsed.retryAfterSec && parsed.retryAfterSec > 0
                 ? ` Please try again in ${parsed.retryAfterSec}s.`
                 : "";
-            throw new Error((parsed.message ?? "The connection wavered.") + waitText);
+            setState((s) => ({
+              ...s,
+              loading: false,
+              streaming: false,
+              error: (parsed.message ?? "The connection wavered.") + waitText,
+            }));
+            return true;
           }
         } catch (err) {
           if (err instanceof Error) {
@@ -252,6 +261,8 @@ export function useReading(): UseReadingReturn {
         streaming: false,
         error: message,
       }));
+    } finally {
+      readingRequestInFlightRef.current = false;
     }
   }, [clearProfile, session, signOut]);
 

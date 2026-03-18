@@ -5,6 +5,12 @@ import { getAngelSystemPrompt, buildReadingContext, buildChatContext } from "../
 import { getMoonPhase, isHighEnergyMoon } from "../lib/moonphase";
 
 const router = Router();
+const readingInFlight = new Set<string>();
+const readingCooldownByUser = new Map<string, number>();
+let globalProviderCooldownUntil = 0;
+
+const MIN_USER_RETRY_SECONDS = 15;
+const DEFAULT_QUOTA_RETRY_SECONDS = 60;
 
 function extractRetryAfterSeconds(err: unknown): number | null {
   if (!err || typeof err !== "object") return null;
@@ -49,6 +55,13 @@ function isQuotaError(err: unknown): boolean {
     msg.includes("rate limit") ||
     msg.includes("too many requests")
   );
+}
+
+function isSpendingCapError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const maybeAny = err as { message?: string };
+  const msg = (maybeAny.message ?? "").toLowerCase();
+  return msg.includes("spending cap");
 }
 
 // ========== Tarot deck (inline for server use) ==========
@@ -126,6 +139,22 @@ router.post("/", async (req: Request, res: Response): Promise<void> => {
   console.log(`[${reqId}] /api/reading start user=${user.id}`);
 
   const today = new Date().toISOString().split("T")[0];
+  const inFlightKey = `${user.id}:${today}`;
+  const nowMs = Date.now();
+
+  const userCooldownUntil = readingCooldownByUser.get(user.id) ?? 0;
+  const activeCooldownUntil = Math.max(userCooldownUntil, globalProviderCooldownUntil);
+  if (activeCooldownUntil > nowMs) {
+    const retryAfterSec = Math.max(
+      1,
+      Math.ceil((activeCooldownUntil - nowMs) / 1000)
+    );
+    res.status(429).json({
+      error: "Please wait before requesting another reading.",
+      retryAfterSec,
+    });
+    return;
+  }
 
   // 2. Check daily gate — return cached if exists
   const { data: existingReading } = await supabaseAdmin
@@ -146,6 +175,19 @@ router.post("/", async (req: Request, res: Response): Promise<void> => {
     });
     return;
   }
+
+  if (readingInFlight.has(inFlightKey)) {
+    res.status(429).json({
+      error: "A reading is already being prepared. Please wait a few seconds.",
+      retryAfterSec: 8,
+    });
+    return;
+  }
+  readingInFlight.add(inFlightKey);
+  readingCooldownByUser.set(user.id, nowMs + MIN_USER_RETRY_SECONDS * 1000);
+  const clearInFlight = () => readingInFlight.delete(inFlightKey);
+  res.once("close", clearInFlight);
+  res.once("finish", clearInFlight);
 
   // 3. Draw card
   const card = drawServerCard();
@@ -213,9 +255,25 @@ router.post("/", async (req: Request, res: Response): Promise<void> => {
     );
   } catch (err) {
     console.error("AI streaming error:", err);
-    const retryAfterSec = extractRetryAfterSeconds(err);
-    const message = isQuotaError(err)
-      ? `The current is crowded right now. Please try again in ${retryAfterSec ?? 45} seconds.`
+    const quotaLike = isQuotaError(err);
+    const detectedRetryAfter = extractRetryAfterSeconds(err);
+    let retryAfterSec = detectedRetryAfter;
+
+    if (quotaLike) {
+      const cooldownSec = Math.max(
+        detectedRetryAfter ?? DEFAULT_QUOTA_RETRY_SECONDS,
+        MIN_USER_RETRY_SECONDS
+      );
+      const cooldownUntil = Date.now() + cooldownSec * 1000;
+      readingCooldownByUser.set(user.id, cooldownUntil);
+      globalProviderCooldownUntil = Math.max(globalProviderCooldownUntil, cooldownUntil);
+      retryAfterSec = cooldownSec;
+    }
+
+    const message = quotaLike
+      ? isSpendingCapError(err)
+        ? `Model provider billing cap is reached for this project. Please raise the cap or try again in ${retryAfterSec ?? DEFAULT_QUOTA_RETRY_SECONDS} seconds.`
+        : `The current is crowded right now. Please try again in ${retryAfterSec ?? DEFAULT_QUOTA_RETRY_SECONDS} seconds.`
       : "The connection wavered.";
     res.write(
       `data: ${JSON.stringify({ type: "error", message, retryAfterSec })}\n\n`

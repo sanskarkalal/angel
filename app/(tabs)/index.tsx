@@ -66,10 +66,10 @@ export default function TodayScreen() {
         duration: 600,
         useNativeDriver: true,
       }).start();
-    } else if (!hasRead) {
+    } else if (!hasRead && !readingHook.error && !readingHook.loading) {
       readingHook.startReading();
     }
-  }, [gateLoading, hasRead]);
+  }, [gateLoading, hasRead, readingHook.error, readingHook.loading]);
 
   // When streaming starts, fade in card
   useEffect(() => {
